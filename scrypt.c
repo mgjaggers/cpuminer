@@ -521,7 +521,7 @@ static void scrypt_1024_1_1_256(const uint32_t *input, uint32_t *output,
 	uint32_t tstate[8], ostate[8];
 	uint32_t X[32] __attribute__((aligned(128)));
 	uint32_t *V;
-	
+//	printf("In 1 way\n");
 	V = (uint32_t *)(((uintptr_t)(scratchpad) + 63) & ~ (uintptr_t)(63));
 
 	memcpy(tstate, midstate, 32);
@@ -557,10 +557,11 @@ static void scrypt_1024_1_1_256_4way(const uint32_t *input,
 	for (i = 0; i < 32; i++)
 		for (k = 0; k < 4; k++)
 			X[k * 32 + i] = W[4 * i + k];
-	scrypt_core(X + 0 * 32, V, N);
-	scrypt_core(X + 1 * 32, V, N);
-	scrypt_core(X + 2 * 32, V, N);
-	scrypt_core(X + 3 * 32, V, N);
+    printf("In 4 way\n");
+	//scrypt_core(X + 0 * 32, V, N);
+	//scrypt_core(X + 1 * 32, V, N);
+	//scrypt_core(X + 2 * 32, V, N);
+	//scrypt_core(X + 3 * 32, V, N);
 	for (i = 0; i < 32; i++)
 		for (k = 0; k < 4; k++)
 			W[4 * i + k] = X[k * 32 + i];
@@ -591,7 +592,7 @@ static void scrypt_1024_1_1_256_3way(const uint32_t *input,
 	PBKDF2_SHA256_80_128(tstate +  0, ostate +  0, input +  0, X +  0);
 	PBKDF2_SHA256_80_128(tstate +  8, ostate +  8, input + 20, X + 32);
 	PBKDF2_SHA256_80_128(tstate + 16, ostate + 16, input + 40, X + 64);
-
+    printf("In 3 way\n");
 	scrypt_core_3way(X, V, N);
 
 	PBKDF2_SHA256_128_32(tstate +  0, ostate +  0, X +  0, output +  0);
@@ -609,7 +610,7 @@ static void scrypt_1024_1_1_256_12way(const uint32_t *input,
 	uint32_t X[12 * 32] __attribute__((aligned(128)));
 	uint32_t *V;
 	int i, j, k;
-	
+	printf("In 12 way\n");
 	V = (uint32_t *)(((uintptr_t)(scratchpad) + 63) & ~ (uintptr_t)(63));
 
 	for (j = 0; j < 3; j++)
@@ -660,7 +661,6 @@ static void scrypt_1024_1_1_256_24way(const uint32_t *input,
 	uint32_t X[24 * 32] __attribute__((aligned(128)));
 	uint32_t *V;
 	int i, j, k;
-	
 	V = (uint32_t *)(((uintptr_t)(scratchpad) + 63) & ~ (uintptr_t)(63));
 	
 	for (j = 0; j < 3; j++) 

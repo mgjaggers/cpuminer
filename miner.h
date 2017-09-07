@@ -2,6 +2,7 @@
 #define __MINER_H__
 
 #include "cpuminer-config.h"
+#include "CL/cl.h"
 
 #include <stdbool.h>
 #include <inttypes.h>
@@ -260,5 +261,17 @@ extern bool tq_push(struct thread_q *tq, void *data);
 extern void *tq_pop(struct thread_q *tq, const struct timespec *abstime);
 extern void tq_freeze(struct thread_q *tq);
 extern void tq_thaw(struct thread_q *tq);
+
+extern cl_device_id device_id;
+extern cl_context context;
+extern cl_command_queue command_queue;
+extern cl_mem memobj;
+extern cl_program program;
+extern cl_kernel kernel;
+extern cl_platform_id * platform_id;
+extern cl_uint ret_num_devices;
+extern cl_uint ret_num_platforms;
+extern cl_int ret;
+
 
 #endif /* __MINER_H__ */

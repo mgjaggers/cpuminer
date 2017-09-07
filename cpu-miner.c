@@ -38,6 +38,7 @@
 #include "compat.h"
 #include "miner.h"
 
+
 #define PROGRAM_NAME		"minerd"
 #define LP_SCANTIME		60
 
@@ -153,6 +154,19 @@ static pthread_mutex_t stats_lock;
 static unsigned long accepted_count = 0L;
 static unsigned long rejected_count = 0L;
 static double *thr_hashrates;
+
+// This is my OpenCL bullshit right here.
+cl_device_id device_id;
+cl_context context;
+cl_command_queue command_queue;
+cl_mem memobj;
+cl_program program;
+cl_kernel kernel;
+cl_platform_id * platform_id;
+cl_uint ret_num_devices;
+cl_uint ret_num_platforms;
+cl_int ret;
+/////////////////////////////////////////
 
 #ifdef HAVE_GETOPT_LONG
 #include <getopt.h>
@@ -1850,7 +1864,43 @@ int main(int argc, char *argv[])
 	struct thr_info *thr;
 	long flags;
 	int i;
-
+    
+    
+    // We are simply going to start our OPENCL application right here.
+        device_id = NULL;
+        context = NULL;
+        command_queue = NULL;
+        memobj = NULL;
+        program = NULL;
+        kernel = NULL;
+        //platform_id;
+        //ret_num_devices;
+        //ret_num_platforms;
+        //ret;
+        
+        /* Get Platform and Device Info */
+        clGetPlatformIDs(0, NULL, &ret_num_platforms);  // Gets the number of platforms we have on our device.
+        platform_id = (cl_platform_id*)malloc(ret_num_platforms * sizeof(cl_platform_id)); // sets up the pointer to all of our platforms
+        ret = clGetPlatformIDs(ret_num_platforms, platform_id, &ret_num_platforms); // Sets all the platforms into platform_id.
+        ret = clGetDeviceIDs(platform_id[0], CL_DEVICE_TYPE_GPU, 1, &device_id, &ret_num_devices);
+        
+        // Get device name
+        size_t device_name_size = 1000;
+        char * device_name = (char *)malloc(device_name_size*sizeof(char));
+        
+        clGetDeviceInfo(device_id, CL_DEVICE_NAME, device_name_size, device_name, &device_name_size); // Getting the device name
+        realloc(device_name, device_name_size*sizeof(char)); //resizing our device_name
+        
+        // Printout current information...
+        printf(" \t# Devices: %i\n", ret_num_devices);
+        printf(" \tDevice Name: %s\n", device_name);
+        
+        /* Create OpenCL context */
+        context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
+        
+        /* Create Command Queue */
+        command_queue = clCreateCommandQueue(context, device_id, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE, &ret);
+    // // // // // // // // // // // /// /// // // /// /// /// // /// //
 	rpc_user = strdup("");
 	rpc_pass = strdup("");
 
