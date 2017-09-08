@@ -10,6 +10,7 @@
 
 #include "cpuminer-config.h"
 #define _GNU_SOURCE
+#define MAX_SOURCE_SIZE (0x100000)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,7 +111,14 @@ static const char *algo_names[] = {
 	[ALGO_SCRYPT]		= "scrypt",
 	[ALGO_SHA256D]		= "sha256d",
 };
-
+ void CheckError (cl_int error)
+ {
+ 	if (error != CL_SUCCESS) {
+ 		printf("OpenCL call failed with error %i\n", error);
+ 		exit(1);
+ 	}
+ }
+ 
 bool opt_debug = false;
 bool opt_protocol = false;
 static bool opt_benchmark = false;
@@ -166,6 +174,10 @@ cl_platform_id * platform_id;
 cl_uint ret_num_devices;
 cl_uint ret_num_platforms;
 cl_int ret;
+uint32_t * openCL_argument;
+size_t * global_work_offset;// = (const size_t *)malloc(sizeof(size_t) * 1);
+size_t * global_work_size;// = (const size_t *)malloc(sizeof(size_t) * 1);
+size_t * local_work_size;// = (const size_t *)malloc(sizeof(size_t) * 1);
 /////////////////////////////////////////
 
 #ifdef HAVE_GETOPT_LONG
@@ -1882,14 +1894,15 @@ int main(int argc, char *argv[])
         clGetPlatformIDs(0, NULL, &ret_num_platforms);  // Gets the number of platforms we have on our device.
         platform_id = (cl_platform_id*)malloc(ret_num_platforms * sizeof(cl_platform_id)); // sets up the pointer to all of our platforms
         ret = clGetPlatformIDs(ret_num_platforms, platform_id, &ret_num_platforms); // Sets all the platforms into platform_id.
+        CheckError(ret);        
         ret = clGetDeviceIDs(platform_id[0], CL_DEVICE_TYPE_GPU, 1, &device_id, &ret_num_devices);
-        
+        CheckError(ret);
+       
         // Get device name
         size_t device_name_size = 1000;
-        char * device_name = (char *)malloc(device_name_size*sizeof(char));
-        
+        clGetDeviceInfo(device_id, CL_DEVICE_NAME, device_name_size, NULL, &device_name_size); // Getting the device name size
+        char * device_name = (char *)malloc((device_name_size+1)*sizeof(char));
         clGetDeviceInfo(device_id, CL_DEVICE_NAME, device_name_size, device_name, &device_name_size); // Getting the device name
-        realloc(device_name, device_name_size*sizeof(char)); //resizing our device_name
         
         // Printout current information...
         printf(" \t# Devices: %i\n", ret_num_devices);
@@ -1897,9 +1910,46 @@ int main(int argc, char *argv[])
         
         /* Create OpenCL context */
         context = clCreateContext(NULL, 1, &device_id, NULL, NULL, &ret);
-        
+        CheckError(ret);
+
         /* Create Command Queue */
         command_queue = clCreateCommandQueue(context, device_id, CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE | CL_QUEUE_PROFILING_ENABLE, &ret);
+        CheckError(ret);
+
+
+        /* Load the source code containing the kernel*/
+        FILE *fp;
+        char fileName[] = "./kernels/test.cl";
+        char *source_str;
+        size_t source_size;
+
+        fp = fopen(fileName, "r");
+        if (!fp) {
+            fprintf(stderr, "Failed to load kernel.\n");
+            exit(1);
+        }
+        
+        source_str = (char*)malloc(MAX_SOURCE_SIZE);
+        source_size = fread(source_str, 1, MAX_SOURCE_SIZE, fp);
+        fclose(fp);
+        
+        /* Create Kernel Program from the source */
+        printf("Create Kernel Program from the source\n");
+        program = clCreateProgramWithSource(context, 1, (const char **)&source_str,
+        (const size_t *)&source_size, &ret);
+        CheckError(ret);
+
+        /* Build Kernel Program */
+        printf("Build Kernel Program\n");
+        ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);
+        CheckError(ret);
+
+        /* Create OpenCL Kernel */
+        printf("Create OpenCL Kernel\n");
+        kernel = clCreateKernel(program, "test", &ret);
+        CheckError(ret);
+
+        
     // // // // // // // // // // // /// /// // // /// /// /// // /// //
 	rpc_user = strdup("");
 	rpc_pass = strdup("");
@@ -1969,6 +2019,24 @@ int main(int argc, char *argv[])
 	if (!opt_n_threads)
 		opt_n_threads = num_processors;
 
+        /* Create a buffer object */
+        printf("Create a buffer object\n");
+        openCL_argument = (uint32_t *)malloc(opt_n_threads * 4 * 32 * sizeof(uint32_t));
+        memobj = clCreateBuffer(context, CL_MEM_READ_WRITE, opt_n_threads * 4 * 32 * sizeof(uint32_t), openCL_argument, &ret);
+        CheckError(ret);
+        // Set argument here?
+        printf("Set argument here?\n");
+        clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memobj);
+        
+        global_work_offset = (size_t *)malloc(sizeof(size_t) * opt_n_threads);
+        global_work_size = (size_t *)malloc(sizeof(size_t) * opt_n_threads);
+        local_work_size = (size_t *)malloc(sizeof(size_t) * opt_n_threads);
+
+        for(int thread_id = 0; thread_id < opt_n_threads; thread_id++){
+            global_work_offset[thread_id] = (size_t)thread_id;
+            global_work_size[thread_id] = 1;
+            local_work_size[thread_id] = 1;
+        }
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog)
 		openlog("cpuminer", LOG_PID, LOG_USER);

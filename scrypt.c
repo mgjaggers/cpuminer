@@ -521,7 +521,7 @@ static void scrypt_1024_1_1_256(const uint32_t *input, uint32_t *output,
 	uint32_t tstate[8], ostate[8];
 	uint32_t X[32] __attribute__((aligned(128)));
 	uint32_t *V;
-//	printf("In 1 way\n");
+
 	V = (uint32_t *)(((uintptr_t)(scratchpad) + 63) & ~ (uintptr_t)(63));
 
 	memcpy(tstate, midstate, 32);
@@ -533,9 +533,16 @@ static void scrypt_1024_1_1_256(const uint32_t *input, uint32_t *output,
 	PBKDF2_SHA256_128_32(tstate, ostate, X, output);
 }
 
+size_t * global_work_offset;// = (const size_t *)malloc(sizeof(size_t) * 1);
+size_t * global_work_size;// = (const size_t *)malloc(sizeof(size_t) * 1);
+size_t * local_work_size;// = (const size_t *)malloc(sizeof(size_t) * 1);
+cl_event * buffer_write;
+cl_event * execute_job;
+cl_event * buffer_read;
+
 #ifdef HAVE_SHA256_4WAY
 static void scrypt_1024_1_1_256_4way(const uint32_t *input,
-	uint32_t *output, uint32_t *midstate, unsigned char *scratchpad, int N)
+	uint32_t *output, uint32_t *midstate, unsigned char *scratchpad, int N, int thr_id)
 {
 	uint32_t tstate[4 * 8] __attribute__((aligned(128)));
 	uint32_t ostate[4 * 8] __attribute__((aligned(128)));
@@ -544,7 +551,8 @@ static void scrypt_1024_1_1_256_4way(const uint32_t *input,
 	uint32_t *V;
 	int i, k;
 	
-	V = (uint32_t *)(((uintptr_t)(scratchpad) + 63) & ~ (uintptr_t)(63));
+    cl_event buffer_write, execute_job, buffer_read;
+    V = (uint32_t *)(((uintptr_t)(scratchpad) + 63) & ~ (uintptr_t)(63));
 
 	for (i = 0; i < 20; i++)
 		for (k = 0; k < 4; k++)
@@ -557,7 +565,26 @@ static void scrypt_1024_1_1_256_4way(const uint32_t *input,
 	for (i = 0; i < 32; i++)
 		for (k = 0; k < 4; k++)
 			X[k * 32 + i] = W[4 * i + k];
-    printf("In 4 way\n");
+    
+    ret = clEnqueueWriteBuffer(command_queue, memobj, CL_FALSE, thr_id * (4 * 32 * sizeof(uint32_t)), 4 * 32 * sizeof(uint32_t), &X, 0, NULL, &buffer_write);
+    CheckError(ret);
+    ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, &global_work_offset[thr_id], &global_work_size[thr_id], &local_work_size[thr_id], 1, &buffer_write, &execute_job);
+    CheckError(ret);
+    ret = clEnqueueReadBuffer(command_queue, memobj, CL_FALSE, thr_id * (4 * 32 * sizeof(uint32_t)), 4 * 32 * sizeof(uint32_t), &X, 1, &execute_job, &buffer_read);
+    CheckError(ret);
+    clWaitForEvents(1, &buffer_read);
+    CheckError(ret);
+    clReleaseEvent(buffer_write);
+    clReleaseEvent(execute_job);
+    clReleaseEvent(buffer_read);
+    
+    for (i = 0; i < 32; i++)
+		for (k = 0; k < 4; k++)
+			if(X[k * 32 + i] == W[4 * i + k])
+                //printf("No change in value");
+    
+    //clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&b_buffer[i]);
+    //printf("In 4 way\n");
 	//scrypt_core(X + 0 * 32, V, N);
 	//scrypt_core(X + 1 * 32, V, N);
 	//scrypt_core(X + 2 * 32, V, N);
@@ -569,6 +596,11 @@ static void scrypt_1024_1_1_256_4way(const uint32_t *input,
 	for (i = 0; i < 8; i++)
 		for (k = 0; k < 4; k++)
 			output[k * 8 + i] = W[4 * i + k];
+    
+    //free(global_work_offset);
+    //free(global_work_size);
+    //free(local_work_size);
+    
 }
 #endif /* HAVE_SHA256_4WAY */
 
@@ -701,7 +733,7 @@ static void scrypt_1024_1_1_256_24way(const uint32_t *input,
 
 int scanhash_scrypt(int thr_id, uint32_t *pdata,
 	unsigned char *scratchbuf, const uint32_t *ptarget,
-	uint32_t max_nonce, unsigned long *hashes_done, int N)
+	uint32_t max_nonce, unsigned long *hashes_done, int N )
 {
 	uint32_t data[SCRYPT_MAX_WAYS * 20], hash[SCRYPT_MAX_WAYS * 8];
 	uint32_t midstate[8];
@@ -727,7 +759,7 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 		
 #if defined(HAVE_SHA256_4WAY)
 		if (throughput == 4)
-			scrypt_1024_1_1_256_4way(data, hash, midstate, scratchbuf, N);
+			scrypt_1024_1_1_256_4way(data, hash, midstate, scratchbuf, N, thr_id);
 		else
 #endif
 #if defined(HAVE_SCRYPT_3WAY) && defined(HAVE_SHA256_4WAY)

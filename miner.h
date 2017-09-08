@@ -171,6 +171,7 @@ struct work_restart {
 	char			padding[128 - sizeof(unsigned long)];
 };
 
+
 extern bool opt_debug;
 extern bool opt_protocol;
 extern bool opt_redirect;
@@ -272,6 +273,11 @@ extern cl_platform_id * platform_id;
 extern cl_uint ret_num_devices;
 extern cl_uint ret_num_platforms;
 extern cl_int ret;
+extern size_t * global_work_offset;// = (const size_t *)malloc(sizeof(size_t) * 1);
+extern size_t * global_work_size;// = (const size_t *)malloc(sizeof(size_t) * 1);
+extern size_t * local_work_size;// = (const size_t *)malloc(sizeof(size_t) * 1);
+extern uint32_t * openCL_argument;
 
+extern void CheckError (cl_int error);
 
 #endif /* __MINER_H__ */
