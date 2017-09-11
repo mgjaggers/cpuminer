@@ -3,6 +3,7 @@
 
 #include "cpuminer-config.h"
 #include "cl/CL.h"
+#define EXTRA_THROUGHPUT 256
 
 #include <stdbool.h>
 #include <inttypes.h>
@@ -267,8 +268,9 @@ extern cl_device_id device_id;
 extern cl_context context;
 extern cl_command_queue command_queue;
 extern cl_mem memobj;
+extern cl_mem cl_xor_scratchpad;
 extern cl_program program;
-extern cl_kernel kernel;
+extern cl_kernel * kernel;
 extern cl_platform_id * platform_id;
 extern cl_uint ret_num_devices;
 extern cl_uint ret_num_platforms;

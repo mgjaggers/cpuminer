@@ -26,14 +26,79 @@
  * This file was originally written by Colin Percival as part of the Tarsnap
  * online backup system.
  */
-
 #include "cpuminer-config.h"
 #include "miner.h"
 
 #include <stdlib.h>
+/*************************************************
+Name	:- aligned_malloc
+Arguments:- number of bytes & Alignment Boundry
+Return :- NULL on error
+valid pointer on success
+
+Working	:- It will allocate memory with starting address 
+multiple of alignment passed and returns pointer 
+to it on success.
+
+Ex. 
+aligned_malloc(50,128);
+This will allocate 50 bytes of memory with
+starting address multiple of 128.
+
+*************************************************/
+
+void *aligned_malloc(size_t bytes, size_t alignment)
+{
+    void *p1 ,*p2; // basic pointer needed for computation.
+
+    /* We need to use malloc provided by C. First we need to allocate memory
+    of size bytes + alignment + sizeof(size_t) . We need 'bytes' because 
+    user requested it. We need to add 'alignment' because malloc can give us 
+    any address and we need to find multiple of 'alignment', so at maximum multiple
+    of alignment will be 'alignment' bytes away from any location. We need 
+    'sizeof(size_t)' for implementing 'aligned_free', since we are returning modified 
+    memory pointer, not given by malloc ,to the user, we must free the memory 
+    allocated by malloc not anything else. So I am storing address given by malloc just above 
+    pointer returning to user. Thats why I need extra space to store that address. 
+    Then I am checking for error returned by malloc, if it returns NULL then 
+    aligned_malloc will fail and return NULL.
+    */
+    if((p1 =(void *) malloc(bytes + alignment + sizeof(size_t)))==NULL)
+    return NULL;
+
+    /*	Next step is to find aligned memory address multiples of alignment.
+    By using basic formule I am finding next address after p1 which is 
+    multiple of alignment.I am storing new address in p2.
+    */
+    size_t addr=(size_t)p1+alignment+sizeof(size_t);
+
+    p2=(void *)(addr - (addr%alignment));
+
+    /*	Final step, I am storing the address returned by malloc 'p1' just "size_t"
+    bytes above p2, which will be useful while calling aligned_free.
+    */
+    *((size_t *)p2-1)=(size_t)p1;
+
+    return p2;
+}
+
+/************************************************
+Name	:- aligned_free
+Arguments	:- pointer to be freed
+Returns	:- Nothing 
+
+*************************************************/
+
+void aligned_free(void *p )
+{
+    /*	Find the address stored by aligned_malloc ,"size_t" bytes above the 
+    current pointer then free it using normal free routine provided by C.
+    */
+    free((void *)(*((size_t *) p-1)));
+}
+
 #include <string.h>
 #include <inttypes.h>
-
 static const uint32_t keypad[12] = {
 	0x80000000, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00000280
 };
@@ -568,7 +633,7 @@ static void scrypt_1024_1_1_256_4way(const uint32_t *input,
     
     ret = clEnqueueWriteBuffer(command_queue, memobj, CL_FALSE, thr_id * (4 * 32 * sizeof(uint32_t)), 4 * 32 * sizeof(uint32_t), &X, 0, NULL, &buffer_write);
     CheckError(ret);
-    ret = clEnqueueNDRangeKernel(command_queue, kernel, 1, &global_work_offset[thr_id], &global_work_size[thr_id], &local_work_size[thr_id], 1, &buffer_write, &execute_job);
+    ret = clEnqueueNDRangeKernel(command_queue, kernel[0], 1, &global_work_offset[thr_id], &global_work_size[thr_id], &local_work_size[thr_id], 1, &buffer_write, &execute_job);
     CheckError(ret);
     ret = clEnqueueReadBuffer(command_queue, memobj, CL_FALSE, thr_id * (4 * 32 * sizeof(uint32_t)), 4 * 32 * sizeof(uint32_t), &X, 1, &execute_job, &buffer_read);
     CheckError(ret);
@@ -601,6 +666,80 @@ static void scrypt_1024_1_1_256_4way(const uint32_t *input,
     //free(global_work_size);
     //free(local_work_size);
     
+}
+static void scrypt_1024_1_1_256_4way_prepare(const uint32_t *input, uint32_t *X, uint32_t *W,
+	 uint32_t *midstate, uint32_t *tstate, uint32_t *ostate)
+{
+	int i, k;
+	
+	for (i = 0; i < 20; i++)
+		for (k = 0; k < 4; k++)
+			W[4 * i + k] = input[k * 20 + i];
+	for (i = 0; i < 8; i++)
+		for (k = 0; k < 4; k++)
+			tstate[4 * i + k] = midstate[i];
+	HMAC_SHA256_80_init_4way(W, tstate, ostate);
+	PBKDF2_SHA256_80_128_4way(tstate, ostate, W, W);
+	for (i = 0; i < 32; i++)
+		for (k = 0; k < 4; k++)
+			X[k * 32 + i] = W[4 * i + k];
+        
+}
+static void scrypt_1024_1_1_256_4way_salsa_offload(uint32_t *X, int thr_id)
+{
+    cl_event buffer_write, execute_job, buffer_read;
+    
+    ret = clEnqueueWriteBuffer(command_queue, memobj, CL_FALSE, thr_id * (EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t)), EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t), X, 0, NULL, &buffer_write);
+    CheckError(ret);
+    ret = clEnqueueNDRangeKernel(command_queue, kernel[0], 1, &global_work_offset[thr_id], &global_work_size[thr_id], &local_work_size[thr_id], 1, &buffer_write, &execute_job);
+    CheckError(ret);
+    ret = clEnqueueReadBuffer(command_queue, memobj, CL_FALSE, thr_id * (EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t)), EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t), X, 1, &execute_job, &buffer_read);
+    CheckError(ret);
+    clWaitForEvents(1, &buffer_read);
+    CheckError(ret);
+    
+    clReleaseEvent(buffer_write);
+    clReleaseEvent(execute_job);
+    clReleaseEvent(buffer_read);
+        
+}
+
+static void scrypt_1024_1_1_256_4way_finish(uint32_t *X, uint32_t *W, uint32_t *tstate, uint32_t *ostate,
+	uint32_t *output)
+{
+	int i, k;
+	
+    
+	for (i = 0; i < 32; i++)
+		for (k = 0; k < 4; k++)
+			W[4 * i + k] = X[k * 32 + i];
+	PBKDF2_SHA256_128_32_4way(tstate, ostate, W, W);
+	for (i = 0; i < 8; i++)
+		for (k = 0; k < 4; k++)
+			output[k * 8 + i] = W[4 * i + k];
+    
+}
+
+static void scrypt_1024_1_1_256_4way_opencl(const uint32_t *input,
+	uint32_t *output, uint32_t *midstate, int thr_id)
+{
+    uint32_t tstate[4 * 8] __attribute__((aligned(128)));
+	uint32_t ostate[4 * 8] __attribute__((aligned(128)));
+	uint32_t W[4 * 32] __attribute__((aligned(128)));
+	//uint32_t *X = (uint32_t *)aligned_malloc(128, sizeof(uint32_t) * 4 * 32); 
+    uint32_t X[EXTRA_THROUGHPUT * 4 * 32] __attribute__((aligned(128)));
+
+    
+    // Increase the number of hashes being prepared to send to the GPU
+     for(int i = 0; i < EXTRA_THROUGHPUT; ++i)
+         scrypt_1024_1_1_256_4way_prepare(&input[i * 80], &X[i*(4*32)], &W[i*(4*32)], midstate, &tstate[i*(4*8)], &ostate[i*(4*8)]);
+    //scrypt_1024_1_1_256_4way_prepare(input, X, W, midstate, tstate, ostate);
+    
+    scrypt_1024_1_1_256_4way_salsa_offload(X, thr_id);
+    
+     for(int i = 0; i < EXTRA_THROUGHPUT; ++i)
+         scrypt_1024_1_1_256_4way_finish(&X[i*(4*32)], &W[i*(4*32)], &tstate[i*(4*8)], &ostate[i*(4*8)], &output[i *(4* 8)]);
+    //scrypt_1024_1_1_256_4way_finish(X, W, tstate, ostate, output);
 }
 #endif /* HAVE_SHA256_4WAY */
 
@@ -735,12 +874,14 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 	unsigned char *scratchbuf, const uint32_t *ptarget,
 	uint32_t max_nonce, unsigned long *hashes_done, int N )
 {
-	uint32_t data[SCRYPT_MAX_WAYS * 20], hash[SCRYPT_MAX_WAYS * 8];
+	uint32_t data[EXTRA_THROUGHPUT*SCRYPT_MAX_WAYS * 20], hash[EXTRA_THROUGHPUT*SCRYPT_MAX_WAYS * 8];
 	uint32_t midstate[8];
 	uint32_t n = pdata[19] - 1;
 	const uint32_t Htarg = ptarget[7];
-	int throughput = scrypt_best_throughput();
+    int OpenCL_throughput = EXTRA_THROUGHPUT;
+	int throughput = scrypt_best_throughput() * OpenCL_throughput;
 	int i;
+
 	
 #ifdef HAVE_SHA256_4WAY
 	if (sha256_use_4way())
@@ -758,9 +899,11 @@ int scanhash_scrypt(int thr_id, uint32_t *pdata,
 			data[i * 20 + 19] = ++n;
 		
 #if defined(HAVE_SHA256_4WAY)
-		if (throughput == 4)
-			scrypt_1024_1_1_256_4way(data, hash, midstate, scratchbuf, N, thr_id);
-		else
+		if (throughput == 4 * OpenCL_throughput){
+            //for(int tp = 0; tp < OpenCL_throughput; tp++)
+            //    scrypt_1024_1_1_256_4way(data + 4 * tp * 20, hash + 4 * tp * 8, midstate, scratchbuf, N, thr_id);
+            scrypt_1024_1_1_256_4way_opencl(data, hash, midstate, thr_id);
+		}else
 #endif
 #if defined(HAVE_SCRYPT_3WAY) && defined(HAVE_SHA256_4WAY)
 		if (throughput == 12)

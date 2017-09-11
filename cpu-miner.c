@@ -168,8 +168,9 @@ cl_device_id device_id;
 cl_context context;
 cl_command_queue command_queue;
 cl_mem memobj;
+cl_mem cl_xor_scratchpad;
 cl_program program;
-cl_kernel kernel;
+cl_kernel * kernel; // Adding arguments to a kernel isn't thread safe, so we need multiple kernels to ensure this.
 cl_platform_id * platform_id;
 cl_uint ret_num_devices;
 cl_uint ret_num_platforms;
@@ -1884,7 +1885,7 @@ int main(int argc, char *argv[])
         command_queue = NULL;
         memobj = NULL;
         program = NULL;
-        kernel = NULL;
+        //kernel = NULL;
         //platform_id;
         //ret_num_devices;
         //ret_num_platforms;
@@ -1943,12 +1944,6 @@ int main(int argc, char *argv[])
         printf("Build Kernel Program\n");
         ret = clBuildProgram(program, 1, &device_id, NULL, NULL, NULL);
         CheckError(ret);
-
-        /* Create OpenCL Kernel */
-        printf("Create OpenCL Kernel\n");
-        kernel = clCreateKernel(program, "test", &ret);
-        CheckError(ret);
-
         
     // // // // // // // // // // // /// /// // // /// /// /// // /// //
 	rpc_user = strdup("");
@@ -2019,14 +2014,45 @@ int main(int argc, char *argv[])
 	if (!opt_n_threads)
 		opt_n_threads = num_processors;
 
+        /* Create OpenCL Kernels */
+        printf("Create OpenCL Kernel(s)\n");
+        kernel = (cl_kernel *)malloc(opt_n_threads * sizeof(cl_kernel));
+        for(int thread = 0; thread < opt_n_threads; ++thread) {
+            kernel[thread] = clCreateKernel(program, "test", &ret);
+            CheckError(ret);
+        }
+
         /* Create a buffer object */
         printf("Create a buffer object\n");
-        openCL_argument = (uint32_t *)malloc(opt_n_threads * 4 * 32 * sizeof(uint32_t));
-        memobj = clCreateBuffer(context, CL_MEM_READ_WRITE, opt_n_threads * 4 * 32 * sizeof(uint32_t), openCL_argument, &ret);
+        openCL_argument = (uint32_t *)malloc(opt_n_threads * EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t));
+        memobj = clCreateBuffer(context, CL_MEM_READ_WRITE, opt_n_threads * EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t), openCL_argument, &ret);
         CheckError(ret);
+        
+        // Protect our max mem alloc size
+        cl_ulong device_global_mem_size = 0; 
+        cl_ulong device_max_mem_alloc_size = 0;
+        cl_ulong scratchpad_buffer_size = 1024 * opt_n_threads * EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t);
+        
+        ret = clGetDeviceInfo(device_id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(cl_ulong), &device_global_mem_size, NULL);
+        CheckError(ret);
+        ret = clGetDeviceInfo(device_id, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong), &device_max_mem_alloc_size, NULL);
+        CheckError(ret);
+        
+        printf("Device global mem size: %llu\n", device_global_mem_size);
+        printf("Device max mem alloc size: %llu\n", device_max_mem_alloc_size);
+        printf("Size of Scratchpad Buffer: %llu\n", scratchpad_buffer_size);
+        
+        if((scratchpad_buffer_size < device_max_mem_alloc_size) && (scratchpad_buffer_size < device_global_mem_size)) {
+            cl_xor_scratchpad = clCreateBuffer(context, CL_MEM_READ_WRITE, scratchpad_buffer_size, NULL, &ret);
+            CheckError(ret);
+        } else {
+            printf("Cannot allocate enough buffer space for our scratchpad.\n");
+            exit(1);
+        }
+        
         // Set argument here?
         printf("Set argument here?\n");
-        clSetKernelArg(kernel, 0, sizeof(cl_mem), (void *)&memobj);
+        clSetKernelArg(kernel[0], 0, sizeof(cl_mem), (void *)&memobj);
         
         global_work_offset = (size_t *)malloc(sizeof(size_t) * opt_n_threads);
         global_work_size = (size_t *)malloc(sizeof(size_t) * opt_n_threads);
