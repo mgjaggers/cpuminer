@@ -2,7 +2,7 @@
 #define __MINER_H__
 
 #include "cpuminer-config.h"
-#include "cl/CL.h"
+#include "CL/cl.h"
 #define EXTRA_THROUGHPUT 256
 
 #include <stdbool.h>
