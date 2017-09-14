@@ -689,7 +689,7 @@ static void scrypt_1024_1_1_256_4way_salsa_offload(uint32_t *X, int thr_id)
 {
     cl_event buffer_write, execute_job, buffer_read;
     
-    ret = clEnqueueWriteBuffer(command_queue, memobj, CL_FALSE, thr_id * (EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t)), EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t), X, 0, NULL, &buffer_write);
+    ret = clEnqueueWriteBuffer(command_queue, memobj, CL_FALSE, thr_id * ((EXTRA_THROUGHPUT * 4) * 32 * sizeof(uint32_t)), EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t), X, 0, NULL, &buffer_write);
     CheckError(ret);
     ret = clEnqueueNDRangeKernel(command_queue, kernel[0], 1, &global_work_offset[thr_id], &global_work_size[thr_id], &local_work_size[thr_id], 1, &buffer_write, &execute_job);
     CheckError(ret);

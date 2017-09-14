@@ -3,7 +3,7 @@
 
 #include "cpuminer-config.h"
 #include "CL/cl.h"
-#define EXTRA_THROUGHPUT 256
+#define EXTRA_THROUGHPUT 512
 
 #include <stdbool.h>
 #include <inttypes.h>

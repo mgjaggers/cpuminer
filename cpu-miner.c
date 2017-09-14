@@ -2031,7 +2031,7 @@ int main(int argc, char *argv[])
         // Protect our max mem alloc size
         cl_ulong device_global_mem_size = 0; 
         cl_ulong device_max_mem_alloc_size = 0;
-        cl_ulong scratchpad_buffer_size = 1024 * opt_n_threads * EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t);
+        cl_ulong scratchpad_buffer_size = (cl_ulong)1024 * opt_n_threads * EXTRA_THROUGHPUT * 4 * 32 * sizeof(uint32_t);
         
         ret = clGetDeviceInfo(device_id, CL_DEVICE_GLOBAL_MEM_SIZE, sizeof(cl_ulong), &device_global_mem_size, NULL);
         CheckError(ret);
@@ -2042,7 +2042,7 @@ int main(int argc, char *argv[])
         printf("Device max mem alloc size: %llu\n", device_max_mem_alloc_size);
         printf("Size of Scratchpad Buffer: %llu\n", scratchpad_buffer_size);
         
-        if((scratchpad_buffer_size < device_max_mem_alloc_size) && (scratchpad_buffer_size < device_global_mem_size)) {
+        if((scratchpad_buffer_size <= device_max_mem_alloc_size) && (scratchpad_buffer_size < device_global_mem_size)) {
             cl_xor_scratchpad = clCreateBuffer(context, CL_MEM_READ_WRITE, scratchpad_buffer_size, NULL, &ret);
             CheckError(ret);
         } else {
@@ -2053,6 +2053,7 @@ int main(int argc, char *argv[])
         // Set argument here?
         printf("Set argument here?\n");
         clSetKernelArg(kernel[0], 0, sizeof(cl_mem), (void *)&memobj);
+        clSetKernelArg(kernel[0], 1, sizeof(cl_mem), (void *)&cl_xor_scratchpad);
         
         global_work_offset = (size_t *)malloc(sizeof(size_t) * opt_n_threads);
         global_work_size = (size_t *)malloc(sizeof(size_t) * opt_n_threads);
@@ -2060,8 +2061,8 @@ int main(int argc, char *argv[])
 
         for(int thread_id = 0; thread_id < opt_n_threads; thread_id++){
             global_work_offset[thread_id] = (size_t)thread_id;
-            global_work_size[thread_id] = 1;
-            local_work_size[thread_id] = 1;
+            global_work_size[thread_id] = 4 * EXTRA_THROUGHPUT;
+            local_work_size[thread_id] = 64 < global_work_size[thread_id]? 64 : global_work_size[thread_id];
         }
 #ifdef HAVE_SYSLOG_H
 	if (use_syslog)
